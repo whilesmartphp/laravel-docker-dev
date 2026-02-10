@@ -43,23 +43,23 @@ The `HOST_UID`/`HOST_GID` build args map container permissions to your host user
 
 ### Makefile
 
-Copy `laravel.mk` into your project and create a thin `Makefile`:
+Copy `laravel.mk` into your project. It works standalone or with a thin project `Makefile`:
 
 ```makefile
 include laravel.mk
-
-up:  ## Start the application
-	$(DC) up -d
-
-setup: up composer-install  ## First-time setup
-	$(EXEC) php artisan key:generate
-	$(MAKE) migrate-fresh-seed
 ```
 
-### Available `laravel.mk` Targets
+Port resolution is automatic — `make up` finds available ports starting from 8000 and stores them in `.ports`.
+
+### Available Targets
 
 | Target | Description |
 |--------|-------------|
+| `up` | Start the application (auto port resolution) |
+| `setup` | First-time setup (up + install + key + migrate + seed) |
+| `restart` | Restart the application |
+| `ports` | Show current port assignments |
+| `reset-ports` | Clear ports and find new available ones |
 | `composer-install` | Install composer dependencies |
 | `composer-update` | Update composer dependencies |
 | `test` | Run tests |

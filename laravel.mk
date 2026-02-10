@@ -2,8 +2,55 @@
 
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
-DC := HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose
-EXEC := $(DC) exec --user www-data app
+
+DEFAULT_APP_PORT ?= 8000
+DEFAULT_MAILHOG_SMTP_PORT ?= 1025
+DEFAULT_MAILHOG_UI_PORT ?= 8025
+PORTS_FILE := .ports
+
+define find_port
+$(shell port=$(1); while nc -z 127.0.0.1 $$port 2>/dev/null || lsof -i :$$port >/dev/null 2>&1; do port=$$((port + 1)); done; echo $$port)
+endef
+
+.ports:
+	@echo "Finding available ports..."
+	@echo "# Auto-generated port assignments" > $(PORTS_FILE)
+	@APP_PORT=$(call find_port,$(DEFAULT_APP_PORT)); \
+	MAILHOG_SMTP_PORT=$(call find_port,$(DEFAULT_MAILHOG_SMTP_PORT)); \
+	MAILHOG_UI_PORT=$(call find_port,$(DEFAULT_MAILHOG_UI_PORT)); \
+	echo "APP_PORT=$$APP_PORT" >> $(PORTS_FILE); \
+	echo "MAILHOG_SMTP_PORT=$$MAILHOG_SMTP_PORT" >> $(PORTS_FILE); \
+	echo "MAILHOG_UI_PORT=$$MAILHOG_UI_PORT" >> $(PORTS_FILE)
+	@echo "Port assignments saved to $(PORTS_FILE)"
+
+DC = $(shell if [ -f $(PORTS_FILE) ]; then cat $(PORTS_FILE) | tr '\n' ' '; fi) HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose
+EXEC = $(DC) exec --user www-data app
+
+up: .ports ## Start the application
+	@. ./$(PORTS_FILE) && $(DC) up -d
+	@. ./$(PORTS_FILE) && echo "Services running on:" && \
+		echo "  App:      http://localhost:$$APP_PORT" && \
+		echo "  MailHog:  http://localhost:$$MAILHOG_UI_PORT"
+
+setup: up composer-install ## First-time setup
+	$(EXEC) php artisan key:generate
+	$(MAKE) migrate-fresh-seed
+	@echo "Setup complete!"
+
+restart: ## Restart the application
+	$(MAKE) down
+	$(MAKE) up
+
+reset-ports: ## Clear ports and find new available ones
+	@rm -f $(PORTS_FILE)
+	@$(MAKE) .ports
+
+ports: ## Show current port assignments
+	@if [ -f $(PORTS_FILE) ]; then \
+		cat $(PORTS_FILE) | grep -v "^#"; \
+	else \
+		echo "No ports file. Run 'make up' to generate."; \
+	fi
 
 composer-install: ## Install composer dependencies
 	$(EXEC) composer install
@@ -55,6 +102,7 @@ stop: ## Stop containers
 
 clean: ## Remove all containers, networks, images, and volumes
 	docker compose down --rmi all -v
+	@rm -f $(PORTS_FILE)
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
