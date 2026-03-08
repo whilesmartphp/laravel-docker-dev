@@ -51,6 +51,43 @@ include laravel.mk
 
 Port resolution is automatic — `make up` finds available ports starting from 8000 and stores them in `.ports`.
 
+### Customizing for Your Project
+
+`laravel.mk` exposes hook variables you can set **before** the `include` to customize behavior without overriding targets:
+
+```makefile
+# Extra port defaults
+DEFAULT_DB_PORT ?= 3306
+DEFAULT_PMA_PORT ?= 8080
+
+# Add extra ports to .ports file
+EXTRA_PORTS_SCRIPT = \
+	DB_PORT=$$(port=$(DEFAULT_DB_PORT); while nc -z 127.0.0.1 $$port 2>/dev/null || lsof -i :$$port >/dev/null 2>&1; do port=$$((port + 1)); done; echo $$port); \
+	PMA_PORT=$$(port=$(DEFAULT_PMA_PORT); while nc -z 127.0.0.1 $$port 2>/dev/null || lsof -i :$$port >/dev/null 2>&1; do port=$$((port + 1)); done; echo $$port); \
+	echo "FORWARD_DB_PORT=$$DB_PORT" >> $(PORTS_FILE); \
+	echo "PMA_PORT=$$PMA_PORT" >> $(PORTS_FILE);
+
+# Show extra service URLs on 'make up'
+EXTRA_UP_INFO = \
+	echo "  phpMyAdmin: http://localhost:$$PMA_PORT" && \
+	echo "  MySQL:      localhost:$$FORWARD_DB_PORT"
+
+# Custom test and lint commands
+TEST_CMD = php artisan test --coverage
+LINT_CMD = composer phpcs:test && composer phpmd && composer pint:test
+
+include laravel.mk
+
+# Add project-specific targets below
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EXTRA_PORTS_SCRIPT` | *(empty)* | Shell script appended to `.ports` generation |
+| `EXTRA_UP_INFO` | *(empty)* | Extra `echo` commands shown after `make up` |
+| `TEST_CMD` | `php artisan test` | Command used by `make test` |
+| `LINT_CMD` | `composer pint:test` | Command used by `make lint` |
+
 ### Available Targets
 
 | Target | Description |
