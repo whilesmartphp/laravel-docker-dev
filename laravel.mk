@@ -12,6 +12,18 @@ define find_port
 $(shell port=$(1); while nc -z 127.0.0.1 $$port 2>/dev/null || lsof -i :$$port >/dev/null 2>&1; do port=$$((port + 1)); done; echo $$port)
 endef
 
+# Projects can define EXTRA_PORTS_SCRIPT to add additional port assignments.
+# Example: EXTRA_PORTS_SCRIPT = DB_PORT=$$(call find_port,3306); echo "DB_PORT=$$DB_PORT" >> $(PORTS_FILE);
+EXTRA_PORTS_SCRIPT ?=
+
+# Projects can define EXTRA_UP_INFO to show additional service URLs after 'make up'.
+# Example: EXTRA_UP_INFO = echo "  MySQL: localhost:$$FORWARD_DB_PORT"
+EXTRA_UP_INFO ?=
+
+# Projects can override TEST_CMD and LINT_CMD for custom test/lint behavior.
+TEST_CMD ?= php artisan test
+LINT_CMD ?= composer pint:test
+
 .ports:
 	@echo "Finding available ports..."
 	@echo "# Auto-generated port assignments" > $(PORTS_FILE)
@@ -20,17 +32,19 @@ endef
 	MAILHOG_UI_PORT=$(call find_port,$(DEFAULT_MAILHOG_UI_PORT)); \
 	echo "APP_PORT=$$APP_PORT" >> $(PORTS_FILE); \
 	echo "MAILHOG_SMTP_PORT=$$MAILHOG_SMTP_PORT" >> $(PORTS_FILE); \
-	echo "MAILHOG_UI_PORT=$$MAILHOG_UI_PORT" >> $(PORTS_FILE)
+	echo "MAILHOG_UI_PORT=$$MAILHOG_UI_PORT" >> $(PORTS_FILE); \
+	$(EXTRA_PORTS_SCRIPT)
 	@echo "Port assignments saved to $(PORTS_FILE)"
 
-DC = $(shell if [ -f $(PORTS_FILE) ]; then cat $(PORTS_FILE) | tr '\n' ' '; fi) HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose
+DC = $(shell if [ -f $(PORTS_FILE) ]; then grep -v "^\#" $(PORTS_FILE) | xargs; fi) HOST_UID=$(HOST_UID) HOST_GID=$(HOST_GID) docker compose
 EXEC = $(DC) exec --user www-data app
 
 up: .ports ## Start the application
 	@. ./$(PORTS_FILE) && $(DC) up -d
 	@. ./$(PORTS_FILE) && echo "Services running on:" && \
 		echo "  App:      http://localhost:$$APP_PORT" && \
-		echo "  MailHog:  http://localhost:$$MAILHOG_UI_PORT"
+		echo "  MailHog:  http://localhost:$$MAILHOG_UI_PORT" && \
+		$(if $(EXTRA_UP_INFO),$(EXTRA_UP_INFO),:)
 
 setup: up composer-install ## First-time setup
 	$(EXEC) php artisan key:generate
@@ -59,10 +73,10 @@ composer-update: ## Update composer dependencies
 	$(EXEC) composer update
 
 test: ## Run tests
-	$(EXEC) php artisan test
+	$(EXEC) $(TEST_CMD)
 
 lint: ## Check code formatting
-	$(EXEC) composer pint:test
+	$(EXEC) $(LINT_CMD)
 
 lint-fix: ## Fix code formatting
 	$(EXEC) composer pint
@@ -108,4 +122,4 @@ help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''
 	@echo 'Targets:'
-	@egrep '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@egrep '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sed 's/^[^:]*://' | sort -u | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
