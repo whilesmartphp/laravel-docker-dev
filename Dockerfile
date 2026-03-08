@@ -8,7 +8,25 @@ RUN apt-get update && apt-get install -y \
     nginx \
     git \
     curl \
+    sudo \
+    vim \
+    nano \
+    less \
+    wget \
+    netcat-openbsd \
+    telnet \
+    iputils-ping \
+    procps \
+    htop \
+    tree \
+    jq \
+    openssh-client \
+    rsync \
+    build-essential \
     libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    libwebp-dev \
     libonig-dev \
     libxml2-dev \
     libzip-dev \
@@ -18,7 +36,8 @@ RUN apt-get update && apt-get install -y \
     supervisor \
     && rm -rf /var/lib/apt/lists/*
 
-RUN docker-php-ext-install pdo_mysql pdo_pgsql mbstring exif pcntl bcmath gd zip
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
+    && docker-php-ext-install pdo_mysql pdo_pgsql mbstring exif pcntl bcmath gd zip
 
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
@@ -32,7 +51,11 @@ RUN set -eux; \
         usermod -o -u ${HOST_UID} -g www-data www-data; \
     else \
         useradd -o -u ${HOST_UID} -g www-data -m -s /bin/bash www-data; \
-    fi
+    fi; \
+    chown -R www-data:www-data /var/www; \
+    mkdir -p /var/www/.composer/cache; \
+    chown -R www-data:www-data /var/www/.composer; \
+    sudo -u www-data git config --global --add safe.directory '*'
 
 COPY nginx.conf /etc/nginx/sites-available/default
 RUN rm -f /etc/nginx/sites-enabled/default \
