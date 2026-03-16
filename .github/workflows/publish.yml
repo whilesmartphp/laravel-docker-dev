@@ -12,7 +12,7 @@ env:
   IMAGE_NAME: whilesmartphp/laravel-dev
 
 jobs:
-  build:
+  build-app:
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -50,30 +50,88 @@ jobs:
           platforms: ${{ matrix.platform }}
           build-args: |
             PHP_VERSION=${{ matrix.php_version }}
-          cache-from: type=gha,scope=${{ matrix.php_version }}-${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.php_version }}-${{ matrix.platform }}
+          cache-from: type=gha,scope=app-${{ matrix.php_version }}-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=app-${{ matrix.php_version }}-${{ matrix.platform }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
 
       - name: Export digest
         if: github.event_name != 'pull_request'
         run: |
-          mkdir -p /tmp/digests/${{ matrix.php_version }}
+          mkdir -p /tmp/digests/app-${{ matrix.php_version }}
           digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${{ matrix.php_version }}/${digest#sha256:}"
+          touch "/tmp/digests/app-${{ matrix.php_version }}/${digest#sha256:}"
 
       - name: Upload digest
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: digest-${{ matrix.php_version }}-${{ matrix.runner }}
-          path: /tmp/digests/${{ matrix.php_version }}
+          name: digest-app-${{ matrix.php_version }}-${{ matrix.runner }}
+          path: /tmp/digests/app-${{ matrix.php_version }}
           if-no-files-found: error
           retention-days: 1
 
-  merge:
+  build-package:
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        php_version: ['8.2', '8.4']
+        platform: ['linux/amd64', 'linux/arm64']
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./package
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            PHP_VERSION=${{ matrix.php_version }}
+          cache-from: type=gha,scope=package-${{ matrix.php_version }}-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=package-${{ matrix.php_version }}-${{ matrix.platform }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p /tmp/digests/package-${{ matrix.php_version }}
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/package-${{ matrix.php_version }}/${digest#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-package-${{ matrix.php_version }}-${{ matrix.runner }}
+          path: /tmp/digests/package-${{ matrix.php_version }}
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-app:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
-    needs: build
+    needs: build-app
     permissions:
       contents: read
       packages: write
@@ -93,7 +151,7 @@ jobs:
       - name: Download digests
         uses: actions/download-artifact@v4
         with:
-          pattern: digest-${{ matrix.php_version }}-*
+          pattern: digest-app-${{ matrix.php_version }}-*
           merge-multiple: true
           path: /tmp/digests
 
@@ -118,3 +176,52 @@ jobs:
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.php_version }}
+
+  merge-package:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    needs: build-package
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        php_version: ['8.2', '8.4']
+
+    steps:
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-package-${{ matrix.php_version }}-*
+          merge-multiple: true
+          path: /tmp/digests
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=package-${{ matrix.php_version }}
+            type=raw,value=package-${{ matrix.php_version }}-{{sha}}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:package-${{ matrix.php_version }}
