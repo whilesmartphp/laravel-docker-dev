@@ -1,15 +1,27 @@
 # Laravel Dev Docker Image
 
-Centralized Laravel development Docker image with nginx, PHP-FPM, and supervisor.
+Centralized Laravel development Docker images with two variants:
 
-## Image
+- **App** — Full Laravel application image with nginx, PHP-FPM, and supervisor
+- **Package** — Lightweight CLI image for package development and testing
+
+## Images
 
 ```
+# App variant (nginx + PHP-FPM + supervisor)
 ghcr.io/whilesmartphp/laravel-dev:8.4
 ghcr.io/whilesmartphp/laravel-dev:8.2
+
+# Package variant (PHP CLI only)
+ghcr.io/whilesmartphp/laravel-dev:package-8.4
+ghcr.io/whilesmartphp/laravel-dev:package-8.2
 ```
 
-## What's Included
+## App Variant
+
+Full-stack Laravel development environment.
+
+### What's Included
 
 - **PHP-FPM** (8.2 or 8.4)
 - **Nginx** with Laravel-optimized config
@@ -17,8 +29,6 @@ ghcr.io/whilesmartphp/laravel-dev:8.2
 - **Composer** (latest)
 - **PHP Extensions:** pdo_mysql, pdo_pgsql, mbstring, exif, pcntl, bcmath, gd, zip
 - **Shared `laravel.mk`** at `/usr/local/share/laravel.mk`
-
-## Usage
 
 ### docker-compose.yml
 
@@ -39,11 +49,9 @@ services:
       - '.:/var/www/html'
 ```
 
-The `HOST_UID`/`HOST_GID` build args map container permissions to your host user, avoiding file ownership issues.
-
 ### Makefile
 
-Copy `laravel.mk` into your project. It works standalone or with a thin project `Makefile`:
+Copy `laravel.mk` into your project or include it:
 
 ```makefile
 include laravel.mk
@@ -77,8 +85,6 @@ TEST_CMD = php artisan test --coverage
 LINT_CMD = composer phpcs:test && composer phpmd && composer pint:test
 
 include laravel.mk
-
-# Add project-specific targets below
 ```
 
 | Variable | Default | Description |
@@ -88,7 +94,7 @@ include laravel.mk
 | `TEST_CMD` | `php artisan test` | Command used by `make test` |
 | `LINT_CMD` | `composer pint:test` | Command used by `make lint` |
 
-### Available Targets
+### App Targets
 
 | Target | Description |
 |--------|-------------|
@@ -115,6 +121,82 @@ include laravel.mk
 | `stop` | Stop containers |
 | `clean` | Remove everything (containers, images, volumes) |
 | `help` | Show available targets |
+
+---
+
+## Package Variant
+
+Lightweight image for developing and testing Laravel packages with Orchestra Testbench.
+
+### What's Included
+
+- **PHP CLI** (8.2 or 8.4)
+- **Composer** (latest)
+- **PHP Extensions:** pdo_mysql, pdo_pgsql, mbstring, zip
+- **Shared `package.mk`** at `/usr/local/share/package.mk`
+
+### docker-compose.yml
+
+```yaml
+name: my-package
+services:
+  app:
+    image: ghcr.io/whilesmartphp/laravel-dev:package-8.4
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: tail -f /dev/null
+    environment:
+      - APP_ENV=testing
+```
+
+### Makefile
+
+Include `package.mk` from the image:
+
+```makefile
+include package.mk
+```
+
+Or override defaults before the include:
+
+```makefile
+TEST_CMD = ./vendor/bin/testbench package:test --parallel
+LINT_FIX_CMD = ./vendor/bin/pint
+
+include package.mk
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TEST_CMD` | `./vendor/bin/testbench package:test` | Command used by `make test` |
+| `LINT_CMD` | `composer pint:test` | Command used by `make lint` |
+| `LINT_FIX_CMD` | `composer pint` | Command used by `make lint-fix` |
+
+### Package Targets
+
+| Target | Description |
+|--------|-------------|
+| `up` | Start containers |
+| `down` | Stop and remove containers |
+| `restart` | Restart containers |
+| `logs` | Show container logs |
+| `bash` | Open a shell in the container |
+| `install` | Install dependencies (starts containers first) |
+| `update` | Update dependencies |
+| `test` | Run tests |
+| `lint` | Check code formatting |
+| `lint-fix` | Fix code formatting |
+| `build` | Build workbench |
+| `serve` | Start development server |
+| `autoload` | Dump composer autoloader |
+| `fresh` | Fresh start (down + up + install) |
+| `setup` | Complete setup (fresh + test) |
+| `check` | Run all checks (lint + test) |
+| `clean` | Remove everything (containers, images, volumes) |
+| `help` | Show available targets |
+
+---
 
 ## Production
 
