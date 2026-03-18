@@ -39,6 +39,9 @@ RUN apt-get update && apt-get install -y \
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install pdo_mysql pdo_pgsql mbstring exif pcntl bcmath gd zip
 
+# Setup PCov
+RUN  pecl install pcov && docker-php-ext-enable pcov
+
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 RUN set -eux; \
